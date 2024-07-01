@@ -1,0 +1,313 @@
+Apresentação
+Iremos utilizar métodos e funções para integrar com o banco de dados. Como um deposito de um valor em uma conta, usaremos padrões e usaremos "Java JDBC API".
+
+O projeto Bytebank
+O objetivo do projeto é realizar operações do dia a dia quando usamos um banco, cadastrar, sacar, etc. 
+Rodamos o projeto de inicio para vermos as opções como estão e abrir uma "conta". 
+Quando listamos ela em outro vez que iniciamos a aplicação, a aconta não existira mais, isso por que a "conta" não foi armazenada em nenhum lugar.
+Para guardar em algum lugar, vamos utilizar o banco de dados.
+
+Configurando o conector
+Agora vamos integrar a aplicação com o nosso banco.
+Java - MySQL.
+Para a conexão, temos a MySQL connector, uma biblioteca, fornece classes e funções que facilitam a aplicação. Para adicionar ela, iremos no "MVN REPOSITORY" e la pesquisamos "mysql connector java" e colocar ela nas nossas dependencias dentro da tag "<dependencies>".
+Vamos conectar a nossa aplicação, e antes nosso projeto precisa ser configurado. Primeiro criaremos uma classe dentro do pacote "br.com.alura.bytebank". Na classe "ConexaoDB" teremos um método para fazer a conexão:
+"public static void main(String... x) {
+
+    try{
+      Connection connection = DriverManager
+          .getConnection("jdbc:mysql://localhost:3306/byte_bank?user=root&password=root");
+
+      System.out.println("Recuperei a conexão!");
+
+      connection.close();
+   } catch (SQLException e){
+      System.out.println(e);
+   }
+}"
+
+Assim a conexão será feita e logo depois já será fechada.
+
+Isolando conexões com factory
+Agora vamos interagir com o banco de dados, executando operações com a nossa "conta".
+Temos a nossa classe "ConexaoDB" com o método para se conectar e toda interação com o bd eu preciso fazer uma conexão.
+Criaremos uma "factory" que contera as conexões. Mudaremos o nome da classe de "ConexaoDB" para "ConnectionFactory" e o método não será mais "main".
+"public Connection recuperarConexao() {
+        try {
+            return DriverManager
+                    .getConnection("jdbc:mysql://localhost:3306/byte_bank?user=root&password=root");
+        } catch (SQLException e) {
+            throw new RuntimeException(e);
+        }
+    }"
+
+Adicionamos outra função e retiramos o "connection.close()" pois fecharemos posteriormente.
+
+Preparando para salvar a conta
+Pegaremos a classe "ConnectionFactory" e vamos instanciar ela na "ContaService":
+"private ConnectionFactory connection;
+
+ContaService(){
+  this.connection = new ConnectionFactory();
+}"
+
+Assim, intanciamos a nossa classe e podemos usar seus métodos nos métodos do service no lugar de só adicionara uma lista estática.
+"...
+String sql = "INSERT INTO conta (numero, saldo, cliente_nome, cliente_cpf, client_emails)" +
+      "VALUES (?, ?, ?, ?, ?)";
+Connection conn = connection.recuperarConexao();
+
+  try{
+    PreparedStatement preparedStatement = conn.prepareStatement(sql);
+
+     preparedStatement.setInt(1, conta.getNumero());
+     preparedStatement.setBigDecimal(2, BigDecimal.ZERO);
+     preparedStatement.setString(3, dadosDaConta.dadosCliente().nome());
+     preparedStatement.setString(4, dadosDaConta.dadosCliente().cpf());
+     preparedStatement.setString(4, dadosDaConta.dadosCliente().email());
+        
+     preparedStatement.execute();
+  } catch (SQLException e) {
+      throw new RuntimeException(e);
+  }
+}"
+
+Salvando contas no banco
+Agora vamos testar o nosso código que acabamos de modificar. Na "BytebankApplication" deu um erro no "ContaService()" pois no service o construtor deve ser "public". 
+Feito isso, basta testar.
+
+Utilizando a classe DAO
+O código de "abrir" que abre a conta, está lotada de código de banco de dados, que fica poluido e misturado em somente um local. 
+Podemos separar essas responsabilidades, refaturando o nosso código, criando a classe "DAO" que é o acesso ao objeto externo.
+Dentro do nosso "ContaDAO" teremos o código sql:
+"private Connection conn;
+
+ContaDAO(Connection connection) {
+   this.conn = connection;
+
+
+public void salvar(DadosAberturaConta dadosDaConta){
+   var cliente = new Cliente(dadosDaConta.dadosCliente());
+   var conta = new Conta(dadosDaConta.numero(), cliente);
+
+String sql = "INSERT INTO conta (numero, saldo, cliente_nome, cliente_cpf, cliente_email)" +
+   "VALUES (?, ?, ?, ?, ?)";
+
+    try{
+      PreparedStatement preparedStatement = conn.prepareStatement(sql);
+
+    preparedStatement.setInt(1, conta.getNumero());
+    preparedStatement.setBigDecimal(2, BigDecimal.ZERO);
+    preparedStatement.setString(3, dadosDaConta.dadosCliente().nome());
+    preparedStatement.setString(4, dadosDaConta.dadosCliente().cpf());
+    preparedStatement.setString(5, dadosDaConta.dadosCliente().email());
+
+    preparedStatement.execute();
+    } catch (SQLException e) {
+       throw new RuntimeException(e);
+    }
+}"
+
+Agora, na classe "ContaService" o método abrir ficou muito menos poluido:
+"public void abrir(DadosAberturaConta dadosDaConta) {
+Connection conn = connection.recuperarConexao();
+  new ContaDAO(conn).salvar(dadosDaConta);
+}"
+
+Preparando para listar contas
+Quando salvamos uma conta, temos que ir ao SQL e fazer um SELECT para listar as contas, mas não quero ir a todo momento para o meu SQL. Como faremos uma query, então vamos criar mais um método na nossa DAO.
+"public Set<Conta> listar() {
+        Set<Conta> contas = new HashSet<>();
+
+        String sql = "SELECT * FROM conta";
+
+        try{
+            PreparedStatement ps = conn.prepareStatement(sql);
+            ResultSet resultSet = ps.executeQuery();
+
+            while(resultSet.next()) {
+                Integer numero = resultSet.getInt(1);
+                BigDecimal saldo = resultSet.getBigDecimal(2);
+                String nome = resultSet.getString(3);
+                String cpf = resultSet.getString(4);
+                String email = resultSet.getString(5);
+                
+                DadosCadastroCliente dadosCadastroCliente =
+                        new DadosCadastroCliente(nome, cpf, email);
+                Cliente cliente = new Cliente(dadosCadastroCliente);
+                
+                contas.add(new Conta (numero, cliente));
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException(e);
+        }
+        return contas;
+    }"
+
+Por enquanto ficou assim nosso novo método.
+
+Listando contas do banco
+Nosso método ja esta pronto, mas falta alterar nossa classe "ContaService".
+"public Set<Conta> listarContasAbertas() {
+  Connection conn = connection.recuperarConexao();
+  return new ContaDAO(conn).listar();
+}"
+
+Fechando recursos com o banco
+
+Escalabilidade de conexões
+O próximo passo é pensar no futuro da nossa aplicação e o nosso fluxo está um pouco custoso, abrindo e fechando a todo momento a aplicação. Para melhorar isso usaremos o "", para escalar nosso número de conexões. Adicionaremos a dependencia pelo HikariCP:
+"<!-- https://mvnrepository.com/artifact/com.zaxxer/HikariCP -->
+<dependency>
+    <groupId>com.zaxxer</groupId>
+    <artifactId>HikariCP</artifactId>
+    <version>5.1.0</version>
+</dependency>"
+
+A gente vai alterar a classe "ConnectionFactory" criando um novo método:
+"private HikariDataSource createDataSource() {
+   HikariConfig config = new HikariConfig();
+   config.setJdbcUrl("jdbc:mysql://localhost:3306/byte_bank");
+   config.setUsername("root");
+   config.setPassword("root");
+   config.setMaximumPoolSize(10);
+
+   return new HikariDataSource(config);
+}"
+
+Isso que a gente fez se chama "pool de conexões".
+
+Depositando valor na conta
+Até agora fizemos criações de conta e a listagem, mas podemos fazer agora as transações. No SQL, usamos o UPDATE para atualizar algo na minha tabela. Precisamos criar um novo método na nossa DAO.
+"public void alterar(Integer numero, BigDecimal valor) {
+  PreparedStatement ps;
+  String sql = "UPDATE conta SET saldo = ? WHERE numero = ?";
+
+  try {
+      ps = conn.prepareStatement(sql);
+
+  ps.setBigDecimal(1, valor);
+  ps.setInt(2, numero);
+
+  ps.execute();
+  ps.close();
+  conn.close();
+  } catch (SQLException e) {
+    throw new RuntimeException(e);
+  }
+}"
+
+Na classe service precisamos colocar este código la no nosso método de "realizardeposito()":
+"public void realizarDeposito(Integer numeroDaConta, BigDecimal valor) {
+        var conta = buscarContaPorNumero(numeroDaConta);
+        if (valor.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new RegraDeNegocioException("Valor do deposito deve ser superior a zero!");
+        }
+
+        Connection conn = connection.recuperarConexao();
+        new ContaDAO(conn).alterar(conta.getNumero(), valor);
+    }"
+
+Quando testamos o código, o valor foi depositado certo, porém somente no banco de dados que deu para visualizar o saldo correto.
+
+Ajustando o saldo zerado
+Vamos arrumar o nosso código que o saldo continua zerado.
+"public Conta(Integer numero, BigDecimal saldo, Cliente titular) {
+        this.numero = numero;
+        this.titular = titular;
+        this.saldo = saldo;
+    }"
+
+O problema estava no constutor da classe "Conta", que iniciava o saldo como ZERO.
+
+Transferência entre contas
+A transferencia nada mais é que o deposito de uma conta e saque de outra, então criaremos um novo método e adicionaremos uma nova opção:
+"...
+case 7:
+  realizarTransferecnia();
+...
+
+private static void realizarTransferecnia() {
+        System.out.println("Digite o número da conta de origem:");
+        var numeroDaContaOrigem = teclado.nextInt();
+
+        System.out.println("Digite o número da conta de destino:");
+        var numeroDaContaDestino = teclado.nextInt();
+
+        System.out.println("Digite o valor a ser transferido:");
+        var valor = teclado.nextBigDecimal();
+
+        service.realizarTransferencia(numeroDaContaOrigem, numeroDaContaDestino, valor);
+
+        System.out.println("Transferência realizado com sucesso!");
+        System.out.println("Pressione qualquer tecla e de ENTER para voltar ao menu principal");
+        teclado.next();
+    }"
+
+Assim conseguimos realizar transferências a partir dos números das contas.
+
+Excluindo contas
+Agora que finalizamos as operações, podemos seguir  a diante e vermos como podemos excluir uma conta. No SQL usamos o DELETE. Criaremos um método na DAO:
+"public void deletar(Integer numeroDaConta){
+   String sql = "DELETE FROM conta WHERE numero = ?";
+
+   try {
+   PreparedStatement ps = conn.prepareStatement(sql);
+
+    ps.setInt(1, numeroDaConta);
+
+    ps.execute();
+    ps.close();
+    conn.close();
+    } catch (SQLException e) {
+       throw new RuntimeException(e);
+    }
+}"
+
+Depois instaciamos ela na Service:
+"public void encerrar(Integer numeroDaConta) {
+   var conta = buscarContaPorNumero(numeroDaConta);
+   if (conta.possuiSaldo()) {
+      throw new RegraDeNegocioException("Conta não pode ser encerrada pois ainda possui saldo!");
+        }
+
+   Connection conn = connection.recuperarConexao();
+
+   new ContaDAO(conn).deletar(numeroDaConta);
+}"
+
+Não precisei mexer no meu Main, pois ja possuia uma opção de encerramento de conta.
+
+Exclusão lógica
+Muitas vezes a gente não quer DELETAR a conta, e sim somente desativar, fazendo com que mostro somente as contas ativadas. Para isso, adicionaremos uma nova coluna boleana.
+Também preciso criar "private Boolean estaAtiva;" na minha classe "Conta" e alterar algumas coisas na classe DAO, mudando as query para que apareça somente as contas ativadas, "...WHERE esta_ativa = true". Fiz um novo método na DAO:
+"public void alterarLogico(Integer numeroDaConta){
+   PreparedStatement ps;
+   String sql = "UPDATE conta SET esta_ativa = false WHERE numero = ?";
+
+   try {
+   ps = conn.prepareStatement(sql);
+
+   ps.setInt(2, numeroDaConta);
+
+   ps.execute();
+   ps.close();
+   conn.close();
+   } catch (SQLException e) {
+      throw new RuntimeException(e);
+   }
+}"
+
+Criaremos uma nova regra na service:
+"public void encerrarLogico(Integer numeroDaConta) {
+   var conta = buscarContaPorNumero(numeroDaConta);
+   if (conta.possuiSaldo()) {
+      throw new RegraDeNegocioException("Conta não pode ser encerrada pois ainda possui saldo!");
+   }
+
+   Connection conn = connection.recuperarConexao();
+
+   new ContaDAO(conn).alterarLogico(numeroDaConta);
+}"
+
+Agora é só mudar no nosso main o "encerrar" para encerrarLogico.
